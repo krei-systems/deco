@@ -1,0 +1,293 @@
+#! /home/rmm/.nix-profile/bin/scsh \
+-o srfi-27 -e main -s
+!#
+
+;;------------------------------------------------------------------
+;; wp --- set wallpaper
+;;------------------------------------------------------------------
+;; Author: Rommel M. Martinez <ebzzry@gmail.com>
+;; Date created: <2007-11-27 15:30 rmm>
+;; Time-stamp: <2016-03-24 17:28:34 rmm>
+;; Copyright (C) 2007 by Rommel M. Martinez
+;;------------------------------------------------------------------
+;; This program is distributed under the terms of the BSD License.
+;;
+;; Redistribution and use in source and binary forms, with or without
+;; modification, are permitted provided that the following conditions
+;; are met:
+;;
+;; 1. Redistributions of source code must retain the above copyright
+;;    notice, this list of conditions and the following disclaimer.
+;; 2. Redistributions in binary form must reproduce the above copyright
+;;    notice, this list of conditions and the following disclaimer in the
+;;    documentation and/or other materials provided with the distribution.
+;;
+;; THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+;; IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+;; OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+;; IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+;; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+;; NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+;; DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+;; THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+;; (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+;; THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+;;------------------------------------------------------------------
+;; Commentary:
+;;
+;; This script sets the root window image (wallpaper).
+;; Features timeout, and random selection.
+;;------------------------------------------------------------------
+;; Code:
+;;
+
+(define *directory* #f)
+
+(define *base-directory*
+  (string-append home-directory "/Wallpapers/"))
+
+(define *directories*
+  (list *base-directory*))
+
+(define *exclude-dirs*
+  '("oops"))
+
+(define *exclude-exts*
+  '("gpg" "xcf"))
+
+(define *base-flags* '())
+
+(define *extra-flags* '())
+
+(define *timeout* #f)
+
+(define *help* #f)
+
+(define *random* #f)
+
+(define *command-flags-alist*
+  '((xv         . ("-root" "-quit" "-geometry"))
+    (fbsetbg    . ("-f"))
+    (bsetbg     . ("-full"))
+    (hsetroot   . ("-fill"))
+    (xsetbg     . ("-fullscreen"))
+    (wmsetbg    . ("--maxscale"))
+    (Esetroot   . ("-scale" "-fit"))))
+
+(define *command* #f)
+
+(define *screen-resolution*
+  (run/strings
+   (pipe (xdpyinfo)
+         (grep "dimensions:")
+         (awk "{print $2}"))))
+
+(define *command-list*
+  '(hsetroot
+    xv
+    xsetbg
+    bsetbg
+    fbsetbg
+    wmsetbg))
+
+(define (get-command)
+  (let* ((command (call-with-current-continuation
+                   (lambda (break)
+                     (for-each (lambda (cmd)
+                                 (let* ((command-string (symbol->string cmd))
+                                        (command (run/strings (which ,command-string))))
+                                   (if (not (null? command))
+                                       (break command-string))))
+                               *command-list*)
+                     (format #t "Error: command not found~%~%")
+                     (format #t "Please install any of the following to continue:~%")
+                     (for-each (lambda (cmd)
+                                 (format #t "~A~%" cmd))
+                               *command-list*)
+                     (exit 1))))
+         (args (cdr (assoc (string->symbol command)
+                           *command-flags-alist*))))
+    (cons command args)))
+
+(define (get-command-line binary tail)
+  (cons binary
+        (append (cdr (assoc (string->symbol binary)
+                            *command-flags-alist*))
+                tail)))
+
+(define (set-command)
+  (let* ((command (get-command))
+         (binary (car command)))
+    (case (string->symbol binary)
+      ((xv)
+       (set! *command*
+             (get-command-line binary *screen-resolution*)))
+      (else (set! *command*
+                  (get-command-line binary '()))))
+    (set! *command*
+          (map (lambda (item)
+                 (string-append
+                  (cond ((number? item) (number->string item))
+                        ((symbol? item) (symbol->string item))
+                        ((string? item) item))
+                  ""))
+               *command*))))
+
+(define (get-binaries)
+  (set-command)
+  (list (car *command*)))
+
+(define *binaries* (get-binaries))
+
+(define (check-binaries)
+  (let ((missing #f))
+    (for-each (lambda (binary)
+                (let ((path (run/strings (which ,binary))))
+                  (if (null? path)
+                      (begin (set! missing #t)
+                             (format #t "~A: command not found~%" binary)))))
+              *binaries*)
+    (if missing
+        (begin (format #t "~%Some required programs cannot be located in your PATH.~%")
+               (format #t "Please install required programs to continue.~%")
+               (exit 1)))))
+
+(define (check-directories)
+  (if (and (file-exists? *base-directory*)
+           (or (file-directory? *base-directory*)
+               (and (file-symlink? *base-directory*)
+                    (file-directory? (read-symlink *base-directory*)))))
+      (let ((file-count (length
+                         (directory-files *base-directory*))))
+        (if (null? file-count)
+            (begin (format #t "Error: ~A is empty.~%")
+                   (exit 1))))
+      (begin (format #t "Error: ~A does not exist.~%"
+                     *base-directory*))))
+
+(define (pre-run)
+  (check-binaries)
+  (check-directories))
+
+(define (display-usage args)
+  (let ((self (file-name-nondirectory (car args))))
+    (format #t
+            "Usage: ~a switch
+Switches:
+-h, --help              Show this help
+-r, --random            Use random image
+-d, --directory dir     Specify directory for `-r' switch
+-t, --timeout secs      Set timeout before next redisplay
+-f, --force command     Use command instead of the default ~A
+" self *command*)))
+
+(define (parse-arguments args)
+  (cond ((null? args) args)
+        (else (case (string->symbol (car args))
+                ((-h --help)
+                 (set! *help* #t)
+                 (parse-arguments (cdr args)))
+                ((-r --random)
+                 (set! *random* #t)
+                 (parse-arguments (cdr args)))
+                ((-d --directory)
+                 (set! *random* #t)
+                 (set! *directory*
+                       (file-name-as-directory
+                        (cadr args)))
+                 (parse-arguments (cddr args)))
+                ((-t --timeout)
+                 (set! *random* #t)
+                 (set! *timeout* (cadr args))
+                 (parse-arguments (cddr args)))
+                ((-f --force)
+                 (set! *command* (cadr args))
+                 (parse-arguments (cddr args)))
+                ((-v --verbose)
+                 (set! *verbose* #t)
+                 (parse-arguments (cdr args)))
+                (else args)))))
+
+(define (filter-directory directory)
+  (let ((files (directory-files directory)))
+
+    ;; Exclude items in *exclude-dirs*
+    (do ((ex *exclude-dirs* (cdr ex)))
+        ((null? ex) files)
+      (set! files (remove (lambda (file)
+                            (string=? file (car ex)))
+                          files)))
+
+    ;; Exclude items in *exclude-exts*
+    (do ((ex *exclude-exts* (cdr ex)))
+        ((null? ex) files)
+      (set! files (remove (lambda (file)
+                            (string=? (file-name-extension file)
+                                      (string-append
+                                       "." (car ex))))
+                          files)))
+    files))
+
+(define (get-random-directory)
+  (random-source-randomize! default-random-source)
+  (let* ((count (length *directories*))
+         (item (random-integer count))
+         (directory (list-ref *directories*
+                              item))
+         (contents (directory-files directory)))
+    (if (null? (directory-files directory))
+        (get-random-directory))
+    (if (or (= (length contents) 0)
+            (not (file-exists? directory))
+            (not (file-directory? directory)))
+        (get-random-directory)
+        (if (and (file-exists? directory)
+                 (file-directory? directory))
+            directory))))
+
+(define (get-random-image directory)
+  (random-source-randomize! default-random-source)
+  (let ((files (filter-directory directory)))
+    (if (null? files)
+        (get-random-image (get-random-directory))
+        (let* ((ref (random-integer (length files)))
+               (file (list-ref files ref))
+               (path (string-append directory file)))
+          (if (file-directory? path)
+              (get-random-image (file-name-as-directory path))
+              path)))))
+
+(define (set-wallpaper flags image)
+  (if (file-exists? image)
+      (run (,@*command* ,@flags ,image))))
+
+(define (set-wallpaper-random flags directory . count)
+  (set-wallpaper flags (get-random-image directory))
+  (if (> (string-length (car count)) 0)
+      (let ((timeout (string->number (car count))))
+        (begin (process-sleep timeout)
+               (set-wallpaper-random flags directory
+                                     (number->string timeout))))))
+
+(define (directory-empty? directory)
+  (if (null? (directory-files directory))
+      #t
+      #f))
+
+(define (main args)
+  (pre-run)
+  (if (not (null? (cdr args)))
+      (let ((file (parse-arguments (cdr args)))
+            (flags (append *base-flags* *extra-flags*)))
+        (cond (*help*
+               (display-usage args)
+               (exit 0))
+              (*random*
+               (set-wallpaper-random flags
+                                     (or *directory* (get-random-directory))
+                                     (or *timeout* "")))
+              (else
+               (set-wallpaper flags (resolve-file-name (car file))))))
+      (display-usage args)))
+
+
