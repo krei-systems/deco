@@ -9,6 +9,7 @@ rec {
       feh
       xorg.xdpyinfo
       which
+      xdg-user-dirs
     ];
   };
   default = shell;
