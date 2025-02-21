@@ -10,6 +10,7 @@ rec {
       xorg.xdpyinfo
       which
       xdg-user-dirs
+      xdg-utils
     ];
   };
   default = shell;

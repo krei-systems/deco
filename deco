@@ -164,7 +164,7 @@ Options:
 -t, --timeout secs      Set timeout before next redisplay
 -f, --force command     Use command instead of the default ~A
 
-See https://github.com/ebzzry/deco for more information
+See https://github.com/krei-systems/deco for more information
 " self *command*)))
 
 ;;; Parse command-line arguments
